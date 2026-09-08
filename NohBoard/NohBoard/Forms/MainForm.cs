@@ -1,4 +1,4 @@
-﻿/*
+/*
 Copyright (C) 2016 by Eric Bataille <e.c.p.bataille@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
@@ -29,6 +29,7 @@ namespace ThoNohT.NohBoard.Forms
     using System.Drawing.Text;
     using System.Linq;
     using System.Net.Http;
+    using System.Runtime.InteropServices;
     using System.Runtime.Serialization.Json;
     using System.Text;
     using System.Threading.Tasks;
@@ -42,6 +43,16 @@ namespace ThoNohT.NohBoard.Forms
     /// </summary>
     public partial class MainForm : Form
     {
+        #region Win32 Drag Imports
+
+        [DllImport("user32.dll")]
+        private static extern bool ReleaseCapture();
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        #endregion Win32 Drag Imports
+
         #region Fields
 
         /// <summary>
@@ -60,6 +71,12 @@ namespace ThoNohT.NohBoard.Forms
         /// </summary>
         private VersionInfo latestVersion = null;
 
+        // Context menu items for quick window control
+        private ToolStripMenuItem mnuWindowMenu;
+        private ToolStripMenuItem mnuAlwaysOnTop;
+        private ToolStripMenuItem mnuBorderless;
+        private ToolStripMenuItem mnuTransparentBg;
+
         #endregion Fields
 
         #region Constructors
@@ -71,9 +88,64 @@ namespace ThoNohT.NohBoard.Forms
         {
             this.InitializeComponent();
             this.SetStyle(ControlStyles.ResizeRedraw, true);
+            this.InitializeWindowContextMenu();
+        }
+
+        private void InitializeWindowContextMenu()
+        {
+            this.mnuWindowMenu = new ToolStripMenuItem("&Window");
+
+            this.mnuAlwaysOnTop = new ToolStripMenuItem("Always on &Top") { CheckOnClick = true };
+            this.mnuAlwaysOnTop.Click += (s, e) =>
+            {
+                GlobalSettings.Settings.AlwaysOnTop = this.mnuAlwaysOnTop.Checked;
+                GlobalSettings.Save();
+                this.ApplySettings();
+            };
+
+            this.mnuBorderless = new ToolStripMenuItem("&Borderless (no title bar)") { CheckOnClick = true };
+            this.mnuBorderless.Click += (s, e) =>
+            {
+                GlobalSettings.Settings.Borderless = this.mnuBorderless.Checked;
+                GlobalSettings.Save();
+                this.ApplySettings();
+            };
+
+            this.mnuTransparentBg = new ToolStripMenuItem("Transparent &Background") { CheckOnClick = true };
+            this.mnuTransparentBg.Click += (s, e) =>
+            {
+                GlobalSettings.Settings.TransparentBackground = this.mnuTransparentBg.Checked;
+                GlobalSettings.Save();
+                this.ApplySettings();
+            };
+
+            this.mnuWindowMenu.DropDownItems.Add(this.mnuAlwaysOnTop);
+            this.mnuWindowMenu.DropDownItems.Add(this.mnuBorderless);
+            this.mnuWindowMenu.DropDownItems.Add(this.mnuTransparentBg);
+
+            int insertIndex = Math.Max(0, this.MainMenu.Items.Count - 2);
+            this.MainMenu.Items.Insert(insertIndex, this.mnuWindowMenu);
         }
 
         #endregion Constructors
+
+        #region Drag Borderless Window
+
+        /// <summary>
+        /// Allows moving the borderless form using Left Mouse Button.
+        /// </summary>
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+
+            if (e.Button == MouseButtons.Left && GlobalSettings.Settings.Borderless && !this.mnuToggleEditMode.Checked)
+            {
+                ReleaseCapture();
+                SendMessage(this.Handle, Defines.WM_NCLBUTTONDOWN, (IntPtr)Defines.HTCAPTION, IntPtr.Zero);
+            }
+        }
+
+        #endregion Drag Borderless Window
 
         #region Version check
 
@@ -472,6 +544,25 @@ namespace ThoNohT.NohBoard.Forms
             var title = GlobalSettings.Settings.WindowTitle;
             this.Text = string.IsNullOrWhiteSpace(title) ? $"NohBoard {Version.Get}" : title;
 
+            // Apply Always on Top & Borderless
+            this.TopMost = GlobalSettings.Settings.AlwaysOnTop;
+            this.FormBorderStyle = GlobalSettings.Settings.Borderless ? FormBorderStyle.None : FormBorderStyle.Sizable;
+
+            // Apply Opacity (10% - 100%)
+            this.Opacity = Math.Max(10, Math.Min(100, GlobalSettings.Settings.Opacity)) / 100.0;
+
+            // Apply Transparent Background
+            if (GlobalSettings.Settings.TransparentBackground && GlobalSettings.CurrentStyle != null)
+            {
+                Color bg = (Color)GlobalSettings.CurrentStyle.BackgroundColor;
+                this.BackColor = Color.FromArgb(255, bg);
+                this.TransparencyKey = this.BackColor;
+            }
+            else
+            {
+                this.TransparencyKey = Color.Empty;
+            }
+
             this.LoadKeyboard();
         }
 
@@ -501,6 +592,16 @@ namespace ThoNohT.NohBoard.Forms
         private void MainMenu_Opening(object sender, System.ComponentModel.CancelEventArgs e)
         {
             this.menuOpen = true;
+
+            // Synchronize Window submenu state
+            if (this.mnuAlwaysOnTop != null)
+                this.mnuAlwaysOnTop.Checked = GlobalSettings.Settings.AlwaysOnTop;
+
+            if (this.mnuBorderless != null)
+                this.mnuBorderless.Checked = GlobalSettings.Settings.Borderless;
+
+            if (this.mnuTransparentBg != null)
+                this.mnuTransparentBg.Checked = GlobalSettings.Settings.TransparentBackground;
 
             this.mnuSaveDefinition.Enabled = GlobalSettings.CurrentDefinition != null;
             if (GlobalSettings.CurrentDefinition != null)
