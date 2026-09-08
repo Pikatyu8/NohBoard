@@ -1,4 +1,4 @@
-﻿/*
+/*
 Copyright (C) 2016 by Eric Bataille <e.c.p.bataille@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
@@ -31,15 +31,16 @@ namespace ThoNohT.NohBoard.Forms
     /// </summary>
     public partial class SettingsForm : Form
     {
-        /// <summary>
-        /// Indicates whether the form is currently capturing the trap toggle key.
-        /// </summary>
         private bool capturingKey = false;
-
-        /// <summary>
-        /// The keycode of the key to use for toggling traps.
-        /// </summary>
         private int trapToggleKey;
+
+        // Dynamic controls for Overlay / Window settings
+        private GroupBox grpWindowOverlay;
+        private CheckBox chkAlwaysOnTop;
+        private CheckBox chkBorderless;
+        private CheckBox chkTransparentBackground;
+        private Label lblOpacity;
+        private NumericUpDown udOpacity;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="SettingsForm" /> class.
@@ -47,6 +48,77 @@ namespace ThoNohT.NohBoard.Forms
         public SettingsForm()
         {
             this.InitializeComponent();
+            this.InitializeWindowOverlayControls();
+        }
+
+        /// <summary>
+        /// Dynamically creates the window overlay controls to avoid modifying designer files.
+        /// </summary>
+        private void InitializeWindowOverlayControls()
+        {
+            var bottomButtons = this.Controls.OfType<Button>().Where(b => b.Top > 200).ToList();
+            int shiftY = 135;
+
+            this.Height += shiftY;
+            foreach (var btn in bottomButtons)
+            {
+                btn.Top += shiftY;
+            }
+
+            int groupTop = bottomButtons.Any() ? bottomButtons.Min(b => b.Top) - shiftY : this.ClientSize.Height - shiftY - 40;
+
+            this.grpWindowOverlay = new GroupBox
+            {
+                Text = "Window & Overlay",
+                Location = new Point(12, groupTop),
+                Size = new Size(this.ClientSize.Width - 24, 125),
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top
+            };
+
+            this.chkAlwaysOnTop = new CheckBox
+            {
+                Text = "Always on top",
+                Location = new Point(15, 20),
+                AutoSize = true
+            };
+
+            this.chkBorderless = new CheckBox
+            {
+                Text = "Borderless (hide title bar)",
+                Location = new Point(15, 44),
+                AutoSize = true
+            };
+
+            this.chkTransparentBackground = new CheckBox
+            {
+                Text = "Transparent background",
+                Location = new Point(15, 68),
+                AutoSize = true
+            };
+
+            this.lblOpacity = new Label
+            {
+                Text = "Opacity (%):",
+                Location = new Point(15, 94),
+                AutoSize = true
+            };
+
+            this.udOpacity = new NumericUpDown
+            {
+                Location = new Point(95, 92),
+                Size = new Size(60, 20),
+                Minimum = 10,
+                Maximum = 100,
+                Value = 100
+            };
+
+            this.grpWindowOverlay.Controls.Add(this.chkAlwaysOnTop);
+            this.grpWindowOverlay.Controls.Add(this.chkBorderless);
+            this.grpWindowOverlay.Controls.Add(this.chkTransparentBackground);
+            this.grpWindowOverlay.Controls.Add(this.lblOpacity);
+            this.grpWindowOverlay.Controls.Add(this.udOpacity);
+
+            this.Controls.Add(this.grpWindowOverlay);
         }
 
         /// <summary>
@@ -86,6 +158,12 @@ namespace ThoNohT.NohBoard.Forms
             this.txtTitle.Text = GlobalSettings.Settings.WindowTitle;
 
             this.udPressHold.Value = GlobalSettings.Settings.PressHold;
+
+            // Load overlay settings
+            this.chkAlwaysOnTop.Checked = GlobalSettings.Settings.AlwaysOnTop;
+            this.chkBorderless.Checked = GlobalSettings.Settings.Borderless;
+            this.chkTransparentBackground.Checked = GlobalSettings.Settings.TransparentBackground;
+            this.udOpacity.Value = Math.Max(10, Math.Min(100, GlobalSettings.Settings.Opacity));
 
             this.SetToolTips();
         }
@@ -139,6 +217,11 @@ namespace ThoNohT.NohBoard.Forms
                 + "If left empty, the default window title of \"NohBoard + version number\" will be shown.");
 
             tooltip.SetToolTip(this.udPressHold, "TODO: Tooltip about holding presses.");
+
+            tooltip.SetToolTip(this.chkAlwaysOnTop, "Keep the NohBoard window on top of games and other windows.");
+            tooltip.SetToolTip(this.chkBorderless, "Hide title bar and borders. In borderless mode, drag the window by holding the Left Mouse Button.");
+            tooltip.SetToolTip(this.chkTransparentBackground, "Makes the background color completely see-through, showing only keys.");
+            tooltip.SetToolTip(this.udOpacity, "Overall window transparency from 10% to 100%.");
         }
 
         /// <summary>
@@ -168,8 +251,13 @@ namespace ThoNohT.NohBoard.Forms
             MouseState.SetMouseFromCenter(GlobalSettings.Settings.MouseFromCenter, Screen.AllScreens.Select(x => (x.Bounds, getCenter(x.Bounds))).ToList());
 
             GlobalSettings.Settings.WindowTitle = this.txtTitle.Text;
-
             GlobalSettings.Settings.PressHold = (int)this.udPressHold.Value;
+
+            // Save overlay settings
+            GlobalSettings.Settings.AlwaysOnTop = this.chkAlwaysOnTop.Checked;
+            GlobalSettings.Settings.Borderless = this.chkBorderless.Checked;
+            GlobalSettings.Settings.TransparentBackground = this.chkTransparentBackground.Checked;
+            GlobalSettings.Settings.Opacity = (int)this.udOpacity.Value;
 
             GlobalSettings.Save();
 
