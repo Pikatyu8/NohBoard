@@ -1,4 +1,4 @@
-﻿/*
+/*
 Copyright (C) 2016 by Eric Bataille <e.c.p.bataille@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
@@ -90,11 +90,30 @@ namespace ThoNohT.NohBoard.Hooking.Interop
         public const int WM_XBUTTONDOWN = 0x020B;
 
         /// <summary>
-        /// The WM_XBUTTONDOWN message is posted when the user releases any X-button.
+        /// The WM_XBUTTONUP message is posted when the user releases any X-button.
         /// </summary>
         public const int WM_XBUTTONUP = 0x020C;
 
         #endregion Mouse messages
+
+        #region Window messages
+
+        /// <summary>
+        /// Sent to a window in order to determine what part of the window corresponds to a particular screen coordinate.
+        /// </summary>
+        public const int WM_NCHITTEST = 0x84;
+
+        /// <summary>
+        /// Posted when the user presses the left mouse button while the cursor is within the nonclient area of a window.
+        /// </summary>
+        public const int WM_NCLBUTTONDOWN = 0x00A1;
+
+        /// <summary>
+        /// In a title bar.
+        /// </summary>
+        public const int HTCAPTION = 0x2;
+
+        #endregion Window messages
 
         #region Keyboard messages
 
