@@ -1,4 +1,4 @@
-﻿/*
+/*
 Copyright (C) 2016 by Eric Bataille <e.c.p.bataille@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
@@ -37,6 +37,8 @@ namespace ThoNohT.NohBoard.Extra
         /// Field for <see cref="UpdateInterval"/>.
         /// </summary>
         private int? updateInterval;
+
+        private int? opacity;
 
         /// <summary>
         /// Indicates whether there were changes made to the definition since the last save or load action.
@@ -85,6 +87,38 @@ namespace ThoNohT.NohBoard.Extra
         public string WindowTitle { get; set; } = "";
 
         #endregion General
+
+        #region Window Overlay & Style
+
+        /// <summary>
+        /// Indicates whether the window stays on top of other windows.
+        /// </summary>
+        [DataMember]
+        public bool AlwaysOnTop { get; set; } = false;
+
+        /// <summary>
+        /// Indicates whether the window borders and title bar are hidden.
+        /// </summary>
+        [DataMember]
+        public bool Borderless { get; set; } = false;
+
+        /// <summary>
+        /// Window opacity from 10% to 100%. Defaults to 100%.
+        /// </summary>
+        [DataMember]
+        public int Opacity
+        {
+            get => this.opacity ?? 100;
+            set => this.opacity = Math.Max(10, Math.Min(100, value));
+        }
+
+        /// <summary>
+        /// Indicates whether the keyboard background color should be made fully transparent.
+        /// </summary>
+        [DataMember]
+        public bool TransparentBackground { get; set; } = false;
+
+        #endregion Window Overlay & Style
 
         #region Input
 
