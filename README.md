@@ -3,11 +3,11 @@
 NohBoard is a keyboard visualization program. I know certain applications already exist that do just this, display your keyboard on-screen. And even more probably. However, so far I have found none that were both free and easy to use. That's where this program came in, I made it to be free and easy to use, without any fancy graphics, and easily capturable (possibly with chroma key). Furthermore, it's very customizable.
 
 # WHAT ADDED
-<img width="443" height="243" alt="image" src="https://github.com/user-attachments/assets/23c334bf-6762-4671-88cc-98517b4da337" />
-
+<img width="440" height="262" alt="image" src="https://github.com/user-attachments/assets/6e834e0d-3c79-400c-9b16-b315a2fed7ee" />
 1. Always on top function
 2. Borderless mode
 3. Transparent BG. No need for OBS anymore!
+4. Click through function
 
 ## Rewrite
 
