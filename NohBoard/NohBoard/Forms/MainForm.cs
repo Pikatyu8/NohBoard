@@ -101,8 +101,10 @@ namespace ThoNohT.NohBoard.Forms
             this.InitializeWindowContextMenu();
             this.InitializeTrayIcon();
 
-            // Handle edit mode changes to automatically toggle borderless & click-through
-            this.mnuToggleEditMode.CheckedChanged += (s, e) => this.ApplyWindowStyles();
+            // Asynchronously reapply window styles after edit mode click/change has completely finished
+            this.mnuToggleEditMode.Click += (s, e) => this.BeginInvoke((Action)this.ApplyWindowStyles);
+            this.mnuToggleEditMode.CheckedChanged += (s, e) => this.BeginInvoke((Action)this.ApplyWindowStyles);
+            this.MainMenu.Closed += (s, e) => this.BeginInvoke((Action)this.ApplyWindowStyles);
         }
 
         private void InitializeTrayIcon()
@@ -208,7 +210,12 @@ namespace ThoNohT.NohBoard.Forms
 
             // In edit mode, borderless is disabled so user has standard borders and controls
             bool shouldBeBorderless = GlobalSettings.Settings.Borderless && !inEditMode;
-            this.FormBorderStyle = shouldBeBorderless ? FormBorderStyle.None : FormBorderStyle.Sizable;
+            var targetBorderStyle = shouldBeBorderless ? FormBorderStyle.None : FormBorderStyle.Sizable;
+
+            if (this.FormBorderStyle != targetBorderStyle)
+            {
+                this.FormBorderStyle = targetBorderStyle;
+            }
 
             if (GlobalSettings.CurrentDefinition != null)
             {
@@ -217,7 +224,7 @@ namespace ThoNohT.NohBoard.Forms
 
             // Always on top
             this.TopMost = GlobalSettings.Settings.AlwaysOnTop;
-            if (GlobalSettings.Settings.AlwaysOnTop)
+            if (GlobalSettings.Settings.AlwaysOnTop && !inEditMode)
             {
                 SetWindowPos(this.Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             }
@@ -239,6 +246,8 @@ namespace ThoNohT.NohBoard.Forms
 
             // Click-through (disabled in edit mode)
             this.UpdateClickThrough();
+
+            this.Invalidate();
         }
 
         private void UpdateClickThrough()
@@ -343,6 +352,7 @@ namespace ThoNohT.NohBoard.Forms
             {
                 this.mnuToggleEditMode.Checked = false;
                 this.mnuToggleEditMode_Click(null, null);
+                this.ApplyWindowStyles();
             }
 
             this.currentlyManipulating = null;
