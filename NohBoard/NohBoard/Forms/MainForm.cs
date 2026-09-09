@@ -49,8 +49,10 @@ namespace ThoNohT.NohBoard.Forms
         private const int WS_EX_LAYERED = 0x80000;
         private const int WS_EX_TRANSPARENT = 0x20;
 
-        private const int WM_HOTKEY = 0x0312;
-        private const int HOTKEY_ID_CLICKTHROUGH = 9001;
+        private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        private const uint SWP_NOSIZE = 0x0001;
+        private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_NOACTIVATE = 0x0010;
 
         [DllImport("user32.dll")]
         private static extern bool ReleaseCapture();
@@ -65,10 +67,7 @@ namespace ThoNohT.NohBoard.Forms
         private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 
         [DllImport("user32.dll")]
-        private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
-
-        [DllImport("user32.dll")]
-        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
         #endregion Win32 Imports
 
@@ -87,7 +86,7 @@ namespace ThoNohT.NohBoard.Forms
         private ToolStripMenuItem mnuTransparentBg;
         private ToolStripMenuItem mnuClickThrough;
 
-        // Tray icon to ensure window can always be accessed
+        // Tray icon
         private NotifyIcon trayIcon;
 
         #endregion Fields
@@ -101,6 +100,9 @@ namespace ThoNohT.NohBoard.Forms
 
             this.InitializeWindowContextMenu();
             this.InitializeTrayIcon();
+
+            // Handle edit mode changes to automatically toggle borderless & click-through
+            this.mnuToggleEditMode.CheckedChanged += (s, e) => this.ApplyWindowStyles();
         }
 
         private void InitializeTrayIcon()
@@ -108,7 +110,7 @@ namespace ThoNohT.NohBoard.Forms
             this.trayIcon = new NotifyIcon
             {
                 Icon = this.Icon,
-                Text = "NohBoard (Press F8 to toggle Click-Through)",
+                Text = "NohBoard (Double click to toggle Click-Through)",
                 Visible = true,
                 ContextMenuStrip = this.MainMenu
             };
@@ -118,7 +120,7 @@ namespace ThoNohT.NohBoard.Forms
             {
                 GlobalSettings.Settings.ClickThrough = !GlobalSettings.Settings.ClickThrough;
                 GlobalSettings.Save();
-                this.UpdateClickThrough();
+                this.ApplyWindowStyles();
             };
         }
 
@@ -131,7 +133,7 @@ namespace ThoNohT.NohBoard.Forms
             {
                 GlobalSettings.Settings.AlwaysOnTop = this.mnuAlwaysOnTop.Checked;
                 GlobalSettings.Save();
-                this.ApplySettings();
+                this.ApplyWindowStyles();
             };
 
             this.mnuBorderless = new ToolStripMenuItem("&Borderless (no title bar)") { CheckOnClick = true };
@@ -139,7 +141,7 @@ namespace ThoNohT.NohBoard.Forms
             {
                 GlobalSettings.Settings.Borderless = this.mnuBorderless.Checked;
                 GlobalSettings.Save();
-                this.ApplySettings();
+                this.ApplyWindowStyles();
             };
 
             this.mnuTransparentBg = new ToolStripMenuItem("Transparent &Background") { CheckOnClick = true };
@@ -147,15 +149,15 @@ namespace ThoNohT.NohBoard.Forms
             {
                 GlobalSettings.Settings.TransparentBackground = this.mnuTransparentBg.Checked;
                 GlobalSettings.Save();
-                this.ApplySettings();
+                this.ApplyWindowStyles();
             };
 
-            this.mnuClickThrough = new ToolStripMenuItem("&Click-Through (Pass clicks) [F8]") { CheckOnClick = true };
+            this.mnuClickThrough = new ToolStripMenuItem("&Click-Through (Pass clicks)") { CheckOnClick = true };
             this.mnuClickThrough.Click += (s, e) =>
             {
                 GlobalSettings.Settings.ClickThrough = this.mnuClickThrough.Checked;
                 GlobalSettings.Save();
-                this.UpdateClickThrough();
+                this.ApplyWindowStyles();
             };
 
             this.mnuWindowMenu.DropDownItems.Add(this.mnuAlwaysOnTop);
@@ -169,37 +171,83 @@ namespace ThoNohT.NohBoard.Forms
 
         #endregion Constructors
 
-        #region Drag Borderless & Hotkey WndProc
+        #region Window Styles & Dragging
 
-        protected override void OnMouseDown(MouseEventArgs e)
+        /// <summary>
+        /// Helper to show modal dialogs reliably above the topmost main window.
+        /// </summary>
+        private DialogResult ShowDialogOnTop(Form dialog)
         {
-            base.OnMouseDown(e);
-
-            if (e.Button == MouseButtons.Left && GlobalSettings.Settings.Borderless && !this.mnuToggleEditMode.Checked)
+            bool wasTopMost = this.TopMost;
+            try
             {
-                ReleaseCapture();
-                SendMessage(this.Handle, Defines.WM_NCLBUTTONDOWN, (IntPtr)Defines.HTCAPTION, IntPtr.Zero);
+                if (wasTopMost)
+                {
+                    this.TopMost = false;
+                    dialog.TopMost = true;
+                }
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                return dialog.ShowDialog(this);
+            }
+            finally
+            {
+                if (wasTopMost)
+                {
+                    this.TopMost = true;
+                    SetWindowPos(this.Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                }
             }
         }
 
-        protected override void WndProc(ref Message m)
+        /// <summary>
+        /// Applies window styles, respecting edit mode.
+        /// </summary>
+        private void ApplyWindowStyles()
         {
-            // Global F8 hotkey caught
-            if (m.Msg == WM_HOTKEY && m.WParam.ToInt32() == HOTKEY_ID_CLICKTHROUGH)
+            bool inEditMode = this.mnuToggleEditMode != null && this.mnuToggleEditMode.Checked;
+
+            // In edit mode, borderless is disabled so user has standard borders and controls
+            bool shouldBeBorderless = GlobalSettings.Settings.Borderless && !inEditMode;
+            this.FormBorderStyle = shouldBeBorderless ? FormBorderStyle.None : FormBorderStyle.Sizable;
+
+            if (GlobalSettings.CurrentDefinition != null)
             {
-                GlobalSettings.Settings.ClickThrough = !GlobalSettings.Settings.ClickThrough;
-                GlobalSettings.Save();
-                this.UpdateClickThrough();
-                return;
+                this.ClientSize = new Size(GlobalSettings.CurrentDefinition.Width, GlobalSettings.CurrentDefinition.Height);
             }
 
-            base.WndProc(ref m);
+            // Always on top
+            this.TopMost = GlobalSettings.Settings.AlwaysOnTop;
+            if (GlobalSettings.Settings.AlwaysOnTop)
+            {
+                SetWindowPos(this.Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+
+            // Opacity
+            this.Opacity = Math.Max(10, Math.Min(100, GlobalSettings.Settings.Opacity)) / 100.0;
+
+            // Transparent background (disabled in edit mode so elements can be seen)
+            if (GlobalSettings.Settings.TransparentBackground && GlobalSettings.CurrentStyle != null && !inEditMode)
+            {
+                Color bg = (Color)GlobalSettings.CurrentStyle.BackgroundColor;
+                this.BackColor = Color.FromArgb(255, bg);
+                this.TransparencyKey = this.BackColor;
+            }
+            else
+            {
+                this.TransparencyKey = Color.Empty;
+            }
+
+            // Click-through (disabled in edit mode)
+            this.UpdateClickThrough();
         }
 
         private void UpdateClickThrough()
         {
+            bool inEditMode = this.mnuToggleEditMode != null && this.mnuToggleEditMode.Checked;
+            bool enable = GlobalSettings.Settings.ClickThrough && !inEditMode;
+
             int exStyle = GetWindowLong(this.Handle, GWL_EXSTYLE);
-            if (GlobalSettings.Settings.ClickThrough)
+            if (enable)
             {
                 SetWindowLong(this.Handle, GWL_EXSTYLE, exStyle | WS_EX_TRANSPARENT | WS_EX_LAYERED);
             }
@@ -209,10 +257,25 @@ namespace ThoNohT.NohBoard.Forms
             }
 
             if (this.mnuClickThrough != null)
+            {
                 this.mnuClickThrough.Checked = GlobalSettings.Settings.ClickThrough;
+                this.mnuClickThrough.Enabled = !inEditMode;
+            }
         }
 
-        #endregion Drag Borderless & Hotkey WndProc
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+
+            // Drag window using Left Click when borderless and not in edit mode
+            if (e.Button == MouseButtons.Left && GlobalSettings.Settings.Borderless && !this.mnuToggleEditMode.Checked)
+            {
+                ReleaseCapture();
+                SendMessage(this.Handle, Defines.WM_NCLBUTTONDOWN, (IntPtr)Defines.HTCAPTION, IntPtr.Zero);
+            }
+        }
+
+        #endregion Window Styles & Dragging
 
         #region Version check
 
@@ -414,7 +477,7 @@ namespace ThoNohT.NohBoard.Forms
                     }
                 };
 
-                manageForm.ShowDialog(this);
+                this.ShowDialogOnTop(manageForm);
             }
         }
 
@@ -431,7 +494,7 @@ namespace ThoNohT.NohBoard.Forms
             this.menuOpen = false;
             using (var saveForm = new SaveKeyboardAsForm())
             {
-                saveForm.ShowDialog(this);
+                this.ShowDialogOnTop(saveForm);
             }
         }
 
@@ -501,9 +564,6 @@ namespace ThoNohT.NohBoard.Forms
             this.UpdateTimer.Enabled = true;
             this.KeyCheckTimer.Enabled = true;
 
-            // Register global F8 hotkey (VK_F8 = 0x77)
-            RegisterHotKey(this.Handle, HOTKEY_ID_CLICKTHROUGH, 0, 0x77);
-
             this.Activate();
             this.ApplySettings();
         }
@@ -514,6 +574,11 @@ namespace ThoNohT.NohBoard.Forms
             {
                 GlobalSettings.Settings.X = this.Location.X;
                 GlobalSettings.Settings.Y = this.Location.Y;
+
+                if (GlobalSettings.Settings.AlwaysOnTop && !this.mnuToggleEditMode.Checked)
+                {
+                    SetWindowPos(this.Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                }
             }
         }
 
@@ -533,8 +598,6 @@ namespace ThoNohT.NohBoard.Forms
                     return;
                 }
             }
-
-            UnregisterHotKey(this.Handle, HOTKEY_ID_CLICKTHROUGH);
 
             if (this.trayIcon != null)
             {
@@ -559,26 +622,7 @@ namespace ThoNohT.NohBoard.Forms
             var title = GlobalSettings.Settings.WindowTitle;
             this.Text = string.IsNullOrWhiteSpace(title) ? $"NohBoard {Version.Get}" : title;
 
-            // Window display
-            this.TopMost = GlobalSettings.Settings.AlwaysOnTop;
-            this.FormBorderStyle = GlobalSettings.Settings.Borderless ? FormBorderStyle.None : FormBorderStyle.Sizable;
-            this.Opacity = Math.Max(10, Math.Min(100, GlobalSettings.Settings.Opacity)) / 100.0;
-
-            // Transparency
-            if (GlobalSettings.Settings.TransparentBackground && GlobalSettings.CurrentStyle != null)
-            {
-                Color bg = (Color)GlobalSettings.CurrentStyle.BackgroundColor;
-                this.BackColor = Color.FromArgb(255, bg);
-                this.TransparencyKey = this.BackColor;
-            }
-            else
-            {
-                this.TransparencyKey = Color.Empty;
-            }
-
-            // Click-through
-            this.UpdateClickThrough();
-
+            this.ApplyWindowStyles();
             this.LoadKeyboard();
         }
 
@@ -588,7 +632,7 @@ namespace ThoNohT.NohBoard.Forms
 
             using (var settingsForm = new SettingsForm())
             {
-                var result = settingsForm.ShowDialog(this);
+                var result = this.ShowDialogOnTop(settingsForm);
                 if (result == DialogResult.Cancel)
                     return;
 
@@ -600,17 +644,28 @@ namespace ThoNohT.NohBoard.Forms
         {
             this.menuOpen = true;
 
+            bool inEditMode = this.mnuToggleEditMode.Checked;
+
             if (this.mnuAlwaysOnTop != null)
                 this.mnuAlwaysOnTop.Checked = GlobalSettings.Settings.AlwaysOnTop;
 
             if (this.mnuBorderless != null)
+            {
                 this.mnuBorderless.Checked = GlobalSettings.Settings.Borderless;
+                this.mnuBorderless.Enabled = !inEditMode;
+            }
 
             if (this.mnuTransparentBg != null)
+            {
                 this.mnuTransparentBg.Checked = GlobalSettings.Settings.TransparentBackground;
+                this.mnuTransparentBg.Enabled = !inEditMode;
+            }
 
             if (this.mnuClickThrough != null)
+            {
                 this.mnuClickThrough.Checked = GlobalSettings.Settings.ClickThrough;
+                this.mnuClickThrough.Enabled = !inEditMode;
+            }
 
             this.mnuSaveDefinition.Enabled = GlobalSettings.CurrentDefinition != null;
             if (GlobalSettings.CurrentDefinition != null)
@@ -622,7 +677,7 @@ namespace ThoNohT.NohBoard.Forms
                 this.elementUnderCursor =
                     GlobalSettings.CurrentDefinition.Elements.FirstOrDefault(x => x.Inside(mousePos));
 
-                if (this.mnuToggleEditMode.Checked && this.selectedDefinition == null)
+                if (inEditMode && this.selectedDefinition == null)
                 {
                     this.highlightedDefinition = this.elementUnderCursor;
                     this.highlightedDefinition?.StartManipulating(mousePos, false);
@@ -633,12 +688,12 @@ namespace ThoNohT.NohBoard.Forms
                 this.mnuElementProperties.Enabled = relevantElement != null;
             }
 
-            this.mnuKeyboardProperties.Visible = this.mnuToggleEditMode.Checked;
-            this.mnuUpdateTextPosition.Visible = this.mnuToggleEditMode.Checked;
-            this.mnuElementProperties.Visible = this.mnuToggleEditMode.Checked;
-            this.mnuEditKeyboardStyle.Visible = this.mnuToggleEditMode.Checked;
-            this.mnuEditElementStyle.Visible = this.mnuToggleEditMode.Checked;
-            this.MainMenuSep1.Visible = this.mnuToggleEditMode.Checked;
+            this.mnuKeyboardProperties.Visible = inEditMode;
+            this.mnuUpdateTextPosition.Visible = inEditMode;
+            this.mnuElementProperties.Visible = inEditMode;
+            this.mnuEditKeyboardStyle.Visible = inEditMode;
+            this.mnuEditElementStyle.Visible = inEditMode;
+            this.MainMenuSep1.Visible = inEditMode;
 
             this.mnuSaveStyleToName.Text = $"Save &To '{GlobalSettings.CurrentStyle.Name}'";
             this.mnuSaveStyleToName.Visible = !GlobalSettings.Settings.LoadedGlobalStyle;
@@ -656,7 +711,7 @@ namespace ThoNohT.NohBoard.Forms
             }
 
             this.mnuMoveElement.Visible = this.relevantDefinition != null;
-            var highlightedSomething = this.mnuToggleEditMode.Checked && this.relevantDefinition != null;
+            var highlightedSomething = inEditMode && this.relevantDefinition != null;
 
             this.mnuAddBoundaryPoint.Visible = highlightedSomething &&
                 this.relevantDefinition.RelevantManipulation.Type == ElementManipulationType.MoveEdge;
@@ -665,7 +720,7 @@ namespace ThoNohT.NohBoard.Forms
                 this.relevantDefinition.RelevantManipulation.Type == ElementManipulationType.MoveBoundary;
 
             this.mnuRemoveElement.Visible = highlightedSomething;
-            this.mnuAddElement.Visible = this.mnuToggleEditMode.Checked && this.relevantDefinition == null;
+            this.mnuAddElement.Visible = inEditMode && this.relevantDefinition == null;
         }
 
         private void MainForm_Deactivate(object sender, EventArgs e)
@@ -767,6 +822,12 @@ namespace ThoNohT.NohBoard.Forms
 
         private void UpdateTimer_Tick(object sender, EventArgs e)
         {
+            // Continuously maintain top-of-Z-order position above taskbar
+            if (GlobalSettings.Settings != null && GlobalSettings.Settings.AlwaysOnTop && !this.mnuToggleEditMode.Checked)
+            {
+                SetWindowPos(this.Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+
             if (KeyboardState.Updated || MouseState.Updated)
                 this.Refresh();
         }
