@@ -49,9 +49,15 @@ namespace ThoNohT.NohBoard.Forms
         private const int WS_EX_LAYERED = 0x80000;
         private const int WS_EX_TRANSPARENT = 0x20;
 
+        private const int WS_SYSMENU = 0x00080000;
+        private const int WS_MINIMIZEBOX = 0x00020000;
+
         private const int WM_SETICON = 0x0080;
         private const int ICON_SMALL = 0;
         private const int ICON_BIG = 1;
+
+        private const uint LWA_COLORKEY = 0x00000001;
+        private const uint LWA_ALPHA = 0x00000002;
 
         private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
         private const uint SWP_NOSIZE = 0x0001;
@@ -69,6 +75,9 @@ namespace ThoNohT.NohBoard.Forms
 
         [DllImport("user32.dll")]
         private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
         [DllImport("user32.dll")]
         private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
@@ -117,12 +126,18 @@ namespace ThoNohT.NohBoard.Forms
 
         public MainForm()
         {
+            // Загружаем настройки до создания дескриптора окна, чтобы сразу применить нужный стиль рамки
+            GlobalSettings.Load();
+
             this.InitializeComponent();
             this.SetStyle(ControlStyles.ResizeRedraw, true);
 
             this.ShowInTaskbar = true;
             this.ShowIcon = true;
-            this.FormBorderStyle = FormBorderStyle.FixedSingle;
+
+            // Если в настройках включен Borderless, сразу стартуем без рамки
+            bool isBorderless = GlobalSettings.Settings != null && GlobalSettings.Settings.Borderless;
+            this.FormBorderStyle = isBorderless ? FormBorderStyle.None : FormBorderStyle.FixedSingle;
 
             try
             {
@@ -218,18 +233,27 @@ namespace ThoNohT.NohBoard.Forms
             get
             {
                 CreateParams cp = base.CreateParams;
-                // Гарантируем наличие иконки окна в таскбаре даже в режиме FormBorderStyle.None
-                cp.ExStyle &= ~0x00000080; // Удаляем WS_EX_TOOLWINDOW
-                cp.ExStyle |= 0x00040000;  // Задаем WS_EX_APPWINDOW
+
+                // WS_SYSMENU критически важен: без него Windows 10/11 не показывает иконку
+                // в таскбаре у окон без заголовка (FormBorderStyle.None)
+                cp.Style |= WS_SYSMENU;
+                cp.Style |= WS_MINIMIZEBOX;
+
+                // Удаляем WS_EX_TOOLWINDOW и принудительно задаем WS_EX_APPWINDOW
+                cp.ExStyle &= ~0x00000080;
+                cp.ExStyle |= 0x00040000;
                 return cp;
             }
         }
 
-        protected override void OnHandleCreated(EventArgs e)
+        protected override void OnShown(EventArgs e)
         {
-            base.OnHandleCreated(e);
+            base.OnShown(e);
+            this.RegisterTaskbarTab();
+        }
 
-            // Регистрируем окно в панели задач Windows через Shell COM API при каждом создании Handle
+        private void RegisterTaskbarTab()
+        {
             try
             {
                 var taskbarListType = Type.GetTypeFromCLSID(new Guid("56FDF344-FD9D-11d0-7586-00A0C958A0C2"));
@@ -242,7 +266,6 @@ namespace ThoNohT.NohBoard.Forms
             }
             catch { }
 
-            // Передаем дескриптор иконки
             if (this.Icon != null)
             {
                 SendMessage(this.Handle, WM_SETICON, (IntPtr)ICON_SMALL, this.Icon.Handle);
@@ -290,7 +313,6 @@ namespace ThoNohT.NohBoard.Forms
             bool inEditMode = this.mnuToggleEditMode != null && this.mnuToggleEditMode.Checked;
             bool isBorderless = GlobalSettings.Settings != null && GlobalSettings.Settings.Borderless && !inEditMode;
 
-            // Выбираем правильный стиль рамки окна
             FormBorderStyle targetStyle = inEditMode
                 ? FormBorderStyle.Sizable
                 : (isBorderless ? FormBorderStyle.None : FormBorderStyle.FixedSingle);
@@ -299,7 +321,8 @@ namespace ThoNohT.NohBoard.Forms
             {
                 Point loc = this.Location;
                 this.FormBorderStyle = targetStyle;
-                this.Location = loc; // Предотвращаем сдвиг окна при пересоздании дескриптора
+                this.Location = loc;
+                this.RegisterTaskbarTab();
             }
 
             this.UpdateFormDimensions();
@@ -311,40 +334,60 @@ namespace ThoNohT.NohBoard.Forms
                 SetWindowPos(this.Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             }
 
-            // Opacity
-            this.Opacity = Math.Max(10, Math.Min(100, GlobalSettings.Settings.Opacity)) / 100.0;
-
-            // Transparent background
-            if (GlobalSettings.Settings.TransparentBackground && GlobalSettings.CurrentStyle != null && !inEditMode)
-            {
-                Color bg = (Color)GlobalSettings.CurrentStyle.BackgroundColor;
-                this.BackColor = Color.FromArgb(255, bg);
-                this.TransparencyKey = this.BackColor;
-            }
-            else
-            {
-                this.TransparencyKey = Color.Empty;
-            }
-
-            // Click-through
-            this.UpdateClickThrough();
+            // Корректная настройка прозрачности, фона и Click-Through
+            this.ApplyLayeredStyles(inEditMode);
 
             this.Invalidate();
+            this.Update();
         }
 
-        private void UpdateClickThrough()
+        private void ApplyLayeredStyles(bool inEditMode)
         {
-            bool inEditMode = this.mnuToggleEditMode != null && this.mnuToggleEditMode.Checked;
-            bool enable = GlobalSettings.Settings.ClickThrough && !inEditMode;
+            bool clickThrough = GlobalSettings.Settings.ClickThrough && !inEditMode;
+            bool transparentBg = GlobalSettings.Settings.TransparentBackground && GlobalSettings.CurrentStyle != null && !inEditMode;
+            int opacityPercent = Math.Max(10, Math.Min(100, GlobalSettings.Settings.Opacity));
+            bool semiTransparent = opacityPercent < 100;
+
+            bool needsLayered = clickThrough || transparentBg || semiTransparent;
 
             int exStyle = GetWindowLong(this.Handle, GWL_EXSTYLE);
-            if (enable)
+
+            if (needsLayered)
             {
-                SetWindowLong(this.Handle, GWL_EXSTYLE, exStyle | WS_EX_TRANSPARENT | WS_EX_LAYERED);
+                exStyle |= WS_EX_LAYERED;
+                if (clickThrough)
+                {
+                    exStyle |= WS_EX_TRANSPARENT;
+                }
+                else
+                {
+                    exStyle &= ~WS_EX_TRANSPARENT;
+                }
+
+                SetWindowLong(this.Handle, GWL_EXSTYLE, exStyle);
+
+                byte alpha = (byte)(opacityPercent * 255 / 100);
+
+                if (transparentBg)
+                {
+                    Color bg = (Color)GlobalSettings.CurrentStyle.BackgroundColor;
+                    this.BackColor = Color.FromArgb(255, bg);
+                    uint crKey = (uint)(bg.R | (bg.G << 8) | (bg.B << 16));
+                    SetLayeredWindowAttributes(this.Handle, crKey, alpha, LWA_COLORKEY | LWA_ALPHA);
+                }
+                else
+                {
+                    // ВАЖНО: Вызов SetLayeredWindowAttributes инициализирует DWM буфер окна!
+                    // Без этого вызова окно при наличии WS_EX_LAYERED остается черным/пустым!
+                    SetLayeredWindowAttributes(this.Handle, 0, alpha, LWA_ALPHA);
+                }
             }
             else
             {
-                SetWindowLong(this.Handle, GWL_EXSTYLE, exStyle & ~WS_EX_TRANSPARENT);
+                // Полностью снимаем слоистый режим, если прозрачность и Click-Through выключены
+                exStyle &= ~WS_EX_TRANSPARENT;
+                exStyle &= ~WS_EX_LAYERED;
+                SetWindowLong(this.Handle, GWL_EXSTYLE, exStyle);
             }
 
             if (this.mnuClickThrough != null)
@@ -358,7 +401,6 @@ namespace ThoNohT.NohBoard.Forms
         {
             base.OnMouseDown(e);
 
-            // В режиме Borderless перемещаем окно зажатием левой кнопки мыши в любой точке формы
             if (e.Button == MouseButtons.Left && GlobalSettings.Settings.Borderless && !this.mnuToggleEditMode.Checked)
             {
                 ReleaseCapture();
@@ -596,12 +638,15 @@ namespace ThoNohT.NohBoard.Forms
 
         private void MainForm_Load(object sender, EventArgs e)
         {
-            if (!GlobalSettings.Load())
+            if (GlobalSettings.Settings == null)
             {
-                MessageBox.Show(
-                    this,
-                    $"Failed to load the settings: {GlobalSettings.Errors}",
-                    "Failed to load settings");
+                if (!GlobalSettings.Load())
+                {
+                    MessageBox.Show(
+                        this,
+                        $"Failed to load the settings: {GlobalSettings.Errors}",
+                        "Failed to load settings");
+                }
             }
 
             this.Location = new Point(GlobalSettings.Settings.X, GlobalSettings.Settings.Y);
