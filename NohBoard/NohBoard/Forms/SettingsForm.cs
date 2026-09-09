@@ -99,7 +99,7 @@ namespace ThoNohT.NohBoard.Forms
 
             this.chkClickThrough = new CheckBox
             {
-                Text = "Click-Through (clicks pass to game) [F8 to toggle]",
+                Text = "Click-Through (clicks pass to game)",
                 Location = new Point(15, 92),
                 AutoSize = true
             };
@@ -228,10 +228,10 @@ namespace ThoNohT.NohBoard.Forms
 
             tooltip.SetToolTip(this.udPressHold, "TODO: Tooltip about holding presses.");
 
-            tooltip.SetToolTip(this.chkAlwaysOnTop, "Keep the NohBoard window on top of games and other windows.");
-            tooltip.SetToolTip(this.chkBorderless, "Hide title bar and borders. Drag the window by holding Left Mouse Button (when Click-Through is disabled).");
+            tooltip.SetToolTip(this.chkAlwaysOnTop, "Keep the NohBoard window on top of games, taskbar and other windows.");
+            tooltip.SetToolTip(this.chkBorderless, "Hide title bar and borders. Can be dragged with Left Click (when Click-Through is off).");
             tooltip.SetToolTip(this.chkTransparentBackground, "Makes the background color completely see-through, showing only keys.");
-            tooltip.SetToolTip(this.chkClickThrough, "Clicks will pass through the window directly into games/apps. Press F8 anywhere to toggle.");
+            tooltip.SetToolTip(this.chkClickThrough, "Clicks will pass through the window directly into games. Double-click tray icon to toggle.");
             tooltip.SetToolTip(this.udOpacity, "Overall window transparency from 10% to 100%.");
         }
 
