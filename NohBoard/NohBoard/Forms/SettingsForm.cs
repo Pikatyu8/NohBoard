@@ -39,6 +39,7 @@ namespace ThoNohT.NohBoard.Forms
         private CheckBox chkAlwaysOnTop;
         private CheckBox chkBorderless;
         private CheckBox chkTransparentBackground;
+        private CheckBox chkClickThrough;
         private Label lblOpacity;
         private NumericUpDown udOpacity;
 
@@ -57,7 +58,7 @@ namespace ThoNohT.NohBoard.Forms
         private void InitializeWindowOverlayControls()
         {
             var bottomButtons = this.Controls.OfType<Button>().Where(b => b.Top > 200).ToList();
-            int shiftY = 135;
+            int shiftY = 160;
 
             this.Height += shiftY;
             foreach (var btn in bottomButtons)
@@ -71,7 +72,7 @@ namespace ThoNohT.NohBoard.Forms
             {
                 Text = "Window & Overlay",
                 Location = new Point(12, groupTop),
-                Size = new Size(this.ClientSize.Width - 24, 125),
+                Size = new Size(this.ClientSize.Width - 24, 150),
                 Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top
             };
 
@@ -96,16 +97,23 @@ namespace ThoNohT.NohBoard.Forms
                 AutoSize = true
             };
 
+            this.chkClickThrough = new CheckBox
+            {
+                Text = "Click-Through (clicks pass to game) [F8 to toggle]",
+                Location = new Point(15, 92),
+                AutoSize = true
+            };
+
             this.lblOpacity = new Label
             {
                 Text = "Opacity (%):",
-                Location = new Point(15, 94),
+                Location = new Point(15, 120),
                 AutoSize = true
             };
 
             this.udOpacity = new NumericUpDown
             {
-                Location = new Point(95, 92),
+                Location = new Point(95, 118),
                 Size = new Size(60, 20),
                 Minimum = 10,
                 Maximum = 100,
@@ -115,6 +123,7 @@ namespace ThoNohT.NohBoard.Forms
             this.grpWindowOverlay.Controls.Add(this.chkAlwaysOnTop);
             this.grpWindowOverlay.Controls.Add(this.chkBorderless);
             this.grpWindowOverlay.Controls.Add(this.chkTransparentBackground);
+            this.grpWindowOverlay.Controls.Add(this.chkClickThrough);
             this.grpWindowOverlay.Controls.Add(this.lblOpacity);
             this.grpWindowOverlay.Controls.Add(this.udOpacity);
 
@@ -163,6 +172,7 @@ namespace ThoNohT.NohBoard.Forms
             this.chkAlwaysOnTop.Checked = GlobalSettings.Settings.AlwaysOnTop;
             this.chkBorderless.Checked = GlobalSettings.Settings.Borderless;
             this.chkTransparentBackground.Checked = GlobalSettings.Settings.TransparentBackground;
+            this.chkClickThrough.Checked = GlobalSettings.Settings.ClickThrough;
             this.udOpacity.Value = Math.Max(10, Math.Min(100, GlobalSettings.Settings.Opacity));
 
             this.SetToolTips();
@@ -219,8 +229,9 @@ namespace ThoNohT.NohBoard.Forms
             tooltip.SetToolTip(this.udPressHold, "TODO: Tooltip about holding presses.");
 
             tooltip.SetToolTip(this.chkAlwaysOnTop, "Keep the NohBoard window on top of games and other windows.");
-            tooltip.SetToolTip(this.chkBorderless, "Hide title bar and borders. In borderless mode, drag the window by holding the Left Mouse Button.");
+            tooltip.SetToolTip(this.chkBorderless, "Hide title bar and borders. Drag the window by holding Left Mouse Button (when Click-Through is disabled).");
             tooltip.SetToolTip(this.chkTransparentBackground, "Makes the background color completely see-through, showing only keys.");
+            tooltip.SetToolTip(this.chkClickThrough, "Clicks will pass through the window directly into games/apps. Press F8 anywhere to toggle.");
             tooltip.SetToolTip(this.udOpacity, "Overall window transparency from 10% to 100%.");
         }
 
@@ -229,7 +240,6 @@ namespace ThoNohT.NohBoard.Forms
         /// </summary>
         private void OkButton_Click(object sender, System.EventArgs e)
         {
-            // Apply the new settings.
             GlobalSettings.Settings.MouseSensitivity = (int)this.udMouseSensitivity.Value;
             GlobalSettings.Settings.ScrollHold = (int)this.udScrollHold.Value;
 
@@ -257,6 +267,7 @@ namespace ThoNohT.NohBoard.Forms
             GlobalSettings.Settings.AlwaysOnTop = this.chkAlwaysOnTop.Checked;
             GlobalSettings.Settings.Borderless = this.chkBorderless.Checked;
             GlobalSettings.Settings.TransparentBackground = this.chkTransparentBackground.Checked;
+            GlobalSettings.Settings.ClickThrough = this.chkClickThrough.Checked;
             GlobalSettings.Settings.Opacity = (int)this.udOpacity.Value;
 
             GlobalSettings.Save();
@@ -264,10 +275,6 @@ namespace ThoNohT.NohBoard.Forms
             this.DialogResult = DialogResult.OK;
         }
 
-        /// <summary>
-        /// Handles the setting of a new trap hotkey, if we are capturing, the pressed key is stored and the capturing
-        /// state is removed.
-        /// </summary>
         private void txtToggleKey_KeyUp(object sender, KeyEventArgs e)
         {
             if (!this.capturingKey) return;
@@ -281,9 +288,6 @@ namespace ThoNohT.NohBoard.Forms
             HookManager.EnableKeyboardHook();
         }
 
-        /// <summary>
-        /// Sets the capturing state for the trap hotkey. Any key pressed will be the hotkey.
-        /// </summary>
         private void txtToggleKey_DoubleClick(object sender, System.EventArgs e)
         {
             HookManager.DisableKeyboardHook();
@@ -292,9 +296,6 @@ namespace ThoNohT.NohBoard.Forms
             this.txtToggleKey.Text = "Press a key...";
         }
 
-        /// <summary>
-        /// Updates the enabled state of the follow shift check boxes.
-        /// </summary>
         private void rdbFollowKeystate_CheckedChanged(object sender, System.EventArgs e)
         {
             this.chkFollowShiftCapsInsensitive.Enabled = !this.rdbFollowKeystate.Checked;
