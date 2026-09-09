@@ -43,11 +43,15 @@ namespace ThoNohT.NohBoard.Forms
     /// </summary>
     public partial class MainForm : Form
     {
-        #region Win32 Imports
+        #region Win32 & Shell Imports
 
         private const int GWL_EXSTYLE = -20;
         private const int WS_EX_LAYERED = 0x80000;
         private const int WS_EX_TRANSPARENT = 0x20;
+
+        private const int WM_SETICON = 0x0080;
+        private const int ICON_SMALL = 0;
+        private const int ICON_BIG = 1;
 
         private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
         private const uint SWP_NOSIZE = 0x0001;
@@ -69,7 +73,22 @@ namespace ThoNohT.NohBoard.Forms
         [DllImport("user32.dll")]
         private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
-        #endregion Win32 Imports
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetCapture();
+
+        [ComImport]
+        [Guid("56FDF342-FD9D-11d0-7586-00A0C958A0C2")]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface ITaskbarList
+        {
+            void HrInit();
+            void AddTab(IntPtr hWnd);
+            void DeleteTab(IntPtr hWnd);
+            void ActivateTab(IntPtr hWnd);
+            void SetActiveAlt(IntPtr hWnd);
+        }
+
+        #endregion Win32 & Shell Imports
 
         #region Fields
 
@@ -89,6 +108,9 @@ namespace ThoNohT.NohBoard.Forms
         // Tray icon
         private NotifyIcon trayIcon;
 
+        // Prevents forcing window on top when dialogs are shown
+        private bool isDialogOpen = false;
+
         #endregion Fields
 
         #region Constructors
@@ -98,13 +120,30 @@ namespace ThoNohT.NohBoard.Forms
             this.InitializeComponent();
             this.SetStyle(ControlStyles.ResizeRedraw, true);
 
+            this.ShowInTaskbar = true;
+            this.ShowIcon = true;
+            this.FormBorderStyle = FormBorderStyle.FixedSingle;
+
+            try
+            {
+                if (System.IO.File.Exists("NohBoard2.ico"))
+                    this.Icon = new Icon("NohBoard2.ico");
+                else
+                    this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            }
+            catch { }
+
             this.InitializeWindowContextMenu();
             this.InitializeTrayIcon();
 
-            // Asynchronously reapply window styles after edit mode click/change has completely finished
             this.mnuToggleEditMode.Click += (s, e) => this.BeginInvoke((Action)this.ApplyWindowStyles);
             this.mnuToggleEditMode.CheckedChanged += (s, e) => this.BeginInvoke((Action)this.ApplyWindowStyles);
-            this.MainMenu.Closed += (s, e) => this.BeginInvoke((Action)this.ApplyWindowStyles);
+
+            this.MainMenu.Closed += (s, e) =>
+            {
+                this.menuOpen = false;
+                this.BeginInvoke((Action)this.ApplyWindowStyles);
+            };
         }
 
         private void InitializeTrayIcon()
@@ -117,7 +156,6 @@ namespace ThoNohT.NohBoard.Forms
                 ContextMenuStrip = this.MainMenu
             };
 
-            // Double click tray icon to toggle Click-Through
             this.trayIcon.DoubleClick += (s, e) =>
             {
                 GlobalSettings.Settings.ClickThrough = !GlobalSettings.Settings.ClickThrough;
@@ -173,26 +211,59 @@ namespace ThoNohT.NohBoard.Forms
 
         #endregion Constructors
 
-        #region Window Styles & Dragging
+        #region Window Styles, Taskbar & Dragging
 
-        /// <summary>
-        /// Helper to show modal dialogs reliably above the topmost main window.
-        /// </summary>
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                // Гарантируем наличие иконки окна в таскбаре даже в режиме FormBorderStyle.None
+                cp.ExStyle &= ~0x00000080; // Удаляем WS_EX_TOOLWINDOW
+                cp.ExStyle |= 0x00040000;  // Задаем WS_EX_APPWINDOW
+                return cp;
+            }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+
+            // Регистрируем окно в панели задач Windows через Shell COM API при каждом создании Handle
+            try
+            {
+                var taskbarListType = Type.GetTypeFromCLSID(new Guid("56FDF344-FD9D-11d0-7586-00A0C958A0C2"));
+                if (taskbarListType != null)
+                {
+                    var taskbarList = (ITaskbarList)Activator.CreateInstance(taskbarListType);
+                    taskbarList.HrInit();
+                    taskbarList.AddTab(this.Handle);
+                }
+            }
+            catch { }
+
+            // Передаем дескриптор иконки
+            if (this.Icon != null)
+            {
+                SendMessage(this.Handle, WM_SETICON, (IntPtr)ICON_SMALL, this.Icon.Handle);
+                SendMessage(this.Handle, WM_SETICON, (IntPtr)ICON_BIG, this.Icon.Handle);
+            }
+        }
+
         private DialogResult ShowDialogOnTop(Form dialog)
         {
+            this.isDialogOpen = true;
             bool wasTopMost = this.TopMost;
             try
             {
-                if (wasTopMost)
-                {
-                    this.TopMost = false;
-                    dialog.TopMost = true;
-                }
+                this.TopMost = false;
+                dialog.TopMost = true;
                 dialog.StartPosition = FormStartPosition.CenterParent;
                 return dialog.ShowDialog(this);
             }
             finally
             {
+                this.isDialogOpen = false;
                 if (wasTopMost)
                 {
                     this.TopMost = true;
@@ -202,29 +273,40 @@ namespace ThoNohT.NohBoard.Forms
         }
 
         /// <summary>
-        /// Applies window styles, respecting edit mode.
+        /// Устанавливает точный размер клиентской области формы под габариты клавиатуры.
         /// </summary>
-        private void ApplyWindowStyles()
+        private void UpdateFormDimensions()
+        {
+            if (GlobalSettings.CurrentDefinition == null)
+                return;
+
+            this.ClientSize = new Size(
+                GlobalSettings.CurrentDefinition.Width,
+                GlobalSettings.CurrentDefinition.Height);
+        }
+
+        public void ApplyWindowStyles()
         {
             bool inEditMode = this.mnuToggleEditMode != null && this.mnuToggleEditMode.Checked;
+            bool isBorderless = GlobalSettings.Settings != null && GlobalSettings.Settings.Borderless && !inEditMode;
 
-            // In edit mode, borderless is disabled so user has standard borders and controls
-            bool shouldBeBorderless = GlobalSettings.Settings.Borderless && !inEditMode;
-            var targetBorderStyle = shouldBeBorderless ? FormBorderStyle.None : FormBorderStyle.Sizable;
+            // Выбираем правильный стиль рамки окна
+            FormBorderStyle targetStyle = inEditMode
+                ? FormBorderStyle.Sizable
+                : (isBorderless ? FormBorderStyle.None : FormBorderStyle.FixedSingle);
 
-            if (this.FormBorderStyle != targetBorderStyle)
+            if (this.FormBorderStyle != targetStyle)
             {
-                this.FormBorderStyle = targetBorderStyle;
+                Point loc = this.Location;
+                this.FormBorderStyle = targetStyle;
+                this.Location = loc; // Предотвращаем сдвиг окна при пересоздании дескриптора
             }
 
-            if (GlobalSettings.CurrentDefinition != null)
-            {
-                this.ClientSize = new Size(GlobalSettings.CurrentDefinition.Width, GlobalSettings.CurrentDefinition.Height);
-            }
+            this.UpdateFormDimensions();
 
             // Always on top
             this.TopMost = GlobalSettings.Settings.AlwaysOnTop;
-            if (GlobalSettings.Settings.AlwaysOnTop && !inEditMode)
+            if (GlobalSettings.Settings.AlwaysOnTop && !inEditMode && !this.isDialogOpen)
             {
                 SetWindowPos(this.Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             }
@@ -232,7 +314,7 @@ namespace ThoNohT.NohBoard.Forms
             // Opacity
             this.Opacity = Math.Max(10, Math.Min(100, GlobalSettings.Settings.Opacity)) / 100.0;
 
-            // Transparent background (disabled in edit mode so elements can be seen)
+            // Transparent background
             if (GlobalSettings.Settings.TransparentBackground && GlobalSettings.CurrentStyle != null && !inEditMode)
             {
                 Color bg = (Color)GlobalSettings.CurrentStyle.BackgroundColor;
@@ -244,7 +326,7 @@ namespace ThoNohT.NohBoard.Forms
                 this.TransparencyKey = Color.Empty;
             }
 
-            // Click-through (disabled in edit mode)
+            // Click-through
             this.UpdateClickThrough();
 
             this.Invalidate();
@@ -276,7 +358,7 @@ namespace ThoNohT.NohBoard.Forms
         {
             base.OnMouseDown(e);
 
-            // Drag window using Left Click when borderless and not in edit mode
+            // В режиме Borderless перемещаем окно зажатием левой кнопки мыши в любой точке формы
             if (e.Button == MouseButtons.Left && GlobalSettings.Settings.Borderless && !this.mnuToggleEditMode.Checked)
             {
                 ReleaseCapture();
@@ -284,7 +366,7 @@ namespace ThoNohT.NohBoard.Forms
             }
         }
 
-        #endregion Window Styles & Dragging
+        #endregion Window Styles, Taskbar & Dragging
 
         #region Version check
 
@@ -359,7 +441,7 @@ namespace ThoNohT.NohBoard.Forms
             this.highlightedDefinition = null;
             this.selectedDefinition = null;
 
-            this.ClientSize = new Size(GlobalSettings.CurrentDefinition.Width, GlobalSettings.CurrentDefinition.Height);
+            this.UpdateFormDimensions();
             this.ResetBackBrushes();
 
             return missingFonts;
@@ -585,7 +667,7 @@ namespace ThoNohT.NohBoard.Forms
                 GlobalSettings.Settings.X = this.Location.X;
                 GlobalSettings.Settings.Y = this.Location.Y;
 
-                if (GlobalSettings.Settings.AlwaysOnTop && !this.mnuToggleEditMode.Checked)
+                if (GlobalSettings.Settings.AlwaysOnTop && !this.mnuToggleEditMode.Checked && !this.isDialogOpen)
                 {
                     SetWindowPos(this.Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
                 }
@@ -832,8 +914,8 @@ namespace ThoNohT.NohBoard.Forms
 
         private void UpdateTimer_Tick(object sender, EventArgs e)
         {
-            // Continuously maintain top-of-Z-order position above taskbar
-            if (GlobalSettings.Settings != null && GlobalSettings.Settings.AlwaysOnTop && !this.mnuToggleEditMode.Checked)
+            if (GlobalSettings.Settings != null && GlobalSettings.Settings.AlwaysOnTop &&
+                !this.mnuToggleEditMode.Checked && !this.menuOpen && !this.isDialogOpen && GetCapture() == IntPtr.Zero)
             {
                 SetWindowPos(this.Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             }
