@@ -4,6 +4,7 @@ NohBoard is a keyboard visualization program. I know certain applications alread
 
 # WHAT ADDED
 <img width="440" height="262" alt="image" src="https://github.com/user-attachments/assets/6e834e0d-3c79-400c-9b16-b315a2fed7ee" />
+
 1. Always on top function
 2. Borderless mode
 3. Transparent BG. No need for OBS anymore!
